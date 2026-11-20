@@ -182,3 +182,29 @@ fun ChatBubble(message: ChatMessage) {
         }
     }
 }
+fun getJarvisReply(question: String): String {
+    val q = question.lowercase()
+
+    return when {
+        q.contains("hello") || q.contains("hi") ->
+            "Hello! I am JARVIS. How can I help you?"
+
+        q.contains("your name") ->
+            "I am JARVIS, your personal AI assistant."
+
+        q.contains("how are you") ->
+            "All systems operational, Sir."
+
+        q.contains("who are you") ->
+            "I am JARVIS, your personal AI assistant."
+
+        q.contains("time") ->
+            "Time feature will be added soon."
+
+        q.contains("help") ->
+            "I am ready to assist you, Sir."
+
+        else ->
+            "I received your message: $question. My AI brain is not connected yet."
+    }
+}
