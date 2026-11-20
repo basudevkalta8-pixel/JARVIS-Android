@@ -23,7 +23,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        implementation("com.squareup.okhttp3:okhttp:4.12.0")
     }
 
     kotlinOptions {
