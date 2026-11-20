@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -33,10 +34,8 @@ import org.json.JSONObject
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         setContent {
             JarvisApp()
         }
@@ -49,12 +48,14 @@ data class ChatMessage(
 )
 
 private val client = OkHttpClient()
-
 private val blue = Color(0xFF00C8FF)
 private val bg = Color(0xFF07111F)
 
 @Composable
 fun JarvisApp() {
+
+    // FIX: LocalContext is inside the Composable
+    val context = LocalContext.current
 
     var input by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
@@ -78,19 +79,12 @@ fun JarvisApp() {
 
     val listState = rememberLazyListState()
 
-    // Text to Speech
-    var tts by remember {
-        mutableStateOf<TextToSpeech?>(null)
-    }
+    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var ttsReady by remember { mutableStateOf(false) }
 
-    var ttsReady by remember {
-        mutableStateOf(false)
-    }
-
-    DisposableEffect(Unit) {
-        val engine = TextToSpeech(
-            androidx.compose.ui.platform.LocalContext.current
-        ) { status ->
+    // Text-to-Speech setup
+    DisposableEffect(context) {
+        val engine = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 ttsReady = true
             }
@@ -104,9 +98,7 @@ fun JarvisApp() {
         }
     }
 
-    // Speech Recognition
-    val context = androidx.compose.ui.platform.LocalContext.current
-
+    // Speech recognition launcher
     val speechLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -114,7 +106,6 @@ fun JarvisApp() {
         listening = false
 
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-
             val spokenText = result.data
                 ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 ?.firstOrNull()
@@ -125,12 +116,13 @@ fun JarvisApp() {
         }
     }
 
+    // Start listening
     fun startListening() {
 
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             messages.add(
                 ChatMessage(
-                    "Speech recognition is not available on this phone.",
+                    "Speech recognition is unavailable on this device.",
                     false
                 )
             )
@@ -138,19 +130,12 @@ fun JarvisApp() {
         }
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-
             putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
             )
-
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-
-            putExtra(
-                RecognizerIntent.EXTRA_PROMPT,
-                "Speak to JARVIS"
-            )
-
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to JARVIS")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
 
@@ -158,29 +143,30 @@ fun JarvisApp() {
         speechLauncher.launch(intent)
     }
 
+    // Speak AI response
     fun speakText(text: String) {
 
-        if (voiceReplyEnabled && ttsReady) {
+        if (!voiceReplyEnabled || !ttsReady) return
 
-            val engine = tts ?: return
+        val engine = tts ?: return
 
-            val hindi = engine.setLanguage(Locale("hi", "IN"))
+        val languageResult = engine.setLanguage(Locale("hi", "IN"))
 
-            if (hindi == TextToSpeech.LANG_MISSING_DATA ||
-                hindi == TextToSpeech.LANG_NOT_SUPPORTED
-            ) {
-                engine.setLanguage(Locale.US)
-            }
-
-            engine.speak(
-                text,
-                TextToSpeech.QUEUE_FLUSH,
-                null,
-                "JARVIS_REPLY"
-            )
+        if (languageResult == TextToSpeech.LANG_MISSING_DATA ||
+            languageResult == TextToSpeech.LANG_NOT_SUPPORTED
+        ) {
+            engine.setLanguage(Locale.US)
         }
+
+        engine.speak(
+            text,
+            TextToSpeech.QUEUE_FLUSH,
+            null,
+            "JARVIS_REPLY"
+        )
     }
 
+    // Send message to AI
     fun sendMessage(question: String) {
 
         if (question.isBlank() || loading) return
@@ -238,9 +224,7 @@ fun JarvisApp() {
         color = bg
     ) {
 
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
+        Column(modifier = Modifier.fillMaxSize()) {
 
             // HEADER
             Column(
@@ -271,17 +255,14 @@ fun JarvisApp() {
                         else -> "● ONLINE"
                     },
                     color = when {
-                        listening -> Color.Yellow
-                        loading -> Color.Yellow
+                        listening || loading -> Color.Yellow
                         else -> Color.Green
                     },
                     fontSize = 13.sp
                 )
             }
 
-            HorizontalDivider(
-                color = blue.copy(alpha = 0.3f)
-            )
+            HorizontalDivider(color = blue.copy(alpha = 0.3f))
 
             // CHAT
             LazyColumn(
@@ -300,7 +281,7 @@ fun JarvisApp() {
                 if (loading) {
                     item {
                         Text(
-                            "JARVIS is thinking...",
+                            text = "JARVIS is thinking...",
                             color = blue,
                             modifier = Modifier.padding(8.dp)
                         )
@@ -317,7 +298,7 @@ fun JarvisApp() {
             ) {
 
                 Text(
-                    "Voice Reply",
+                    text = "Voice Reply",
                     color = Color.White,
                     modifier = Modifier.weight(1f)
                 )
@@ -326,10 +307,7 @@ fun JarvisApp() {
                     checked = voiceReplyEnabled,
                     onCheckedChange = {
                         voiceReplyEnabled = it
-
-                        if (!it) {
-                            tts?.stop()
-                        }
+                        if (!it) tts?.stop()
                     }
                 )
             }
@@ -347,10 +325,7 @@ fun JarvisApp() {
                     onValueChange = { input = it },
                     modifier = Modifier.weight(1f),
                     placeholder = {
-                        Text(
-                            "Ask JARVIS...",
-                            color = Color.Gray
-                        )
+                        Text("Ask JARVIS...", color = Color.Gray)
                     },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
@@ -374,10 +349,7 @@ fun JarvisApp() {
                     ),
                     contentPadding = PaddingValues(horizontal = 12.dp)
                 ) {
-                    Text(
-                        "🎤",
-                        fontSize = 20.sp
-                    )
+                    Text("🎤", fontSize = 20.sp)
                 }
 
                 Spacer(modifier = Modifier.width(6.dp))
@@ -397,16 +369,14 @@ fun JarvisApp() {
                     ),
                     contentPadding = PaddingValues(horizontal = 12.dp)
                 ) {
-                    Text(
-                        "Send",
-                        color = Color.Black
-                    )
+                    Text("Send", color = Color.Black)
                 }
             }
         }
     }
 }
 
+// OpenRouter AI connection
 suspend fun askOpenRouter(
     history: List<JSONObject>
 ): String = withContext(Dispatchers.IO) {
@@ -416,7 +386,7 @@ suspend fun askOpenRouter(
         val apiKey = BuildConfig.OPENROUTER_API_KEY
 
         if (apiKey.isBlank()) {
-            return@withContext "ERROR:OpenRouter API key missing."
+            return@withContext "ERROR: OpenRouter API key missing."
         }
 
         val messagesArray = JSONArray()
@@ -428,7 +398,7 @@ suspend fun askOpenRouter(
                     "content",
                     "You are JARVIS, an intelligent personal AI assistant. " +
                     "Be friendly, smart, natural and helpful. " +
-                    "Reply in Hindi, Hinglish or English depending on the user. " +
+                    "Reply in Hindi, Hinglish or English according to the user. " +
                     "Keep answers clear and conversational. " +
                     "Never pretend to perform actions you cannot perform."
                 )
@@ -459,7 +429,7 @@ suspend fun askOpenRouter(
             val responseText = response.body?.string().orEmpty()
 
             if (!response.isSuccessful) {
-                return@withContext "ERROR:AI server error ${response.code}"
+                return@withContext "ERROR: AI server error ${response.code}"
             }
 
             val result = JSONObject(responseText)
@@ -474,11 +444,11 @@ suspend fun askOpenRouter(
         }
 
     } catch (e: Exception) {
-
-        "ERROR:Connection failed. Please check internet."
+        "ERROR: Connection failed. Please check internet."
     }
 }
 
+// CHAT BUBBLE
 @Composable
 fun ChatBubble(message: ChatMessage) {
 
