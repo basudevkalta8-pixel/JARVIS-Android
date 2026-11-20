@@ -156,15 +156,15 @@ fun ChatBubble(message: ChatMessage) {
         Color(0xFF142333)
     }
 
-    val alignment = if (message.isUser) {
-        Alignment.CenterEnd
+    val horizontalAlignment = if (message.isUser) {
+        Alignment.End
     } else {
-        Alignment.CenterStart
+        Alignment.Start
     }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = alignment
+        horizontalAlignment = horizontalAlignment
     ) {
         Card(
             modifier = Modifier.widthIn(max = 300.dp),
@@ -180,32 +180,5 @@ fun ChatBubble(message: ChatMessage) {
                 modifier = Modifier.padding(14.dp)
             )
         }
-    }
-}
-
-fun getJarvisReply(question: String): String {
-    val q = question.lowercase()
-
-    return when {
-        q.contains("hello") || q.contains("hi") ->
-            "Hello! I am ready to assist you."
-
-        q.contains("your name") ->
-            "I am JARVIS, your personal AI assistant."
-
-        q.contains("how are you") ->
-            "All systems are operational. How can I help you?"
-
-        q.contains("time") ->
-            "I don't have live clock access yet. We can add it next."
-
-        q.contains("who are you") ->
-            "I am JARVIS, designed to be your personal assistant."
-
-        q.contains("help") ->
-            "Of course! Tell me what you need, and I will try to help."
-
-        else ->
-            "I received your message. My AI connection is not added yet, but my interface is working."
     }
 }
