@@ -54,6 +54,141 @@ private const val PREFS_NAME = "jarvis_memory"
 private const val CHAT_KEY = "saved_chat"
 private const val HISTORY_KEY = "saved_history"
 
+// APP LIST
+private val appPackages = mapOf(
+    "youtube" to "com.google.android.youtube",
+    "whatsapp" to "com.whatsapp",
+    "chrome" to "com.android.chrome",
+    "instagram" to "com.instagram.android",
+    "facebook" to "com.facebook.katana",
+    "maps" to "com.google.android.apps.maps",
+    "camera" to "com.android.camera",
+    "gmail" to "com.google.android.gm",
+    "telegram" to "org.telegram.messenger",
+    "free fire" to "com.dts.freefireth"
+)
+
+// PHONE COMMANDS
+fun executePhoneCommand(
+    question: String,
+    controller: PhoneController
+): String? {
+
+    val q = question.lowercase(Locale.ROOT).trim()
+
+    // TORCH ON
+    if (
+        q.contains("torch on") ||
+        q.contains("flashlight on") ||
+        q.contains("light on") ||
+        q.contains("torch chalu") ||
+        q.contains("light chalu") ||
+        q.contains("टॉर्च चालू")
+    ) {
+        return controller.torchOn()
+    }
+
+    // TORCH OFF
+    if (
+        q.contains("torch off") ||
+        q.contains("flashlight off") ||
+        q.contains("light off") ||
+        q.contains("torch band") ||
+        q.contains("light band") ||
+        q.contains("टॉर्च बंद")
+    ) {
+        return controller.torchOff()
+    }
+
+    // SETTINGS
+    if (
+        q == "settings" ||
+        q.contains("open settings") ||
+        q.contains("phone settings") ||
+        q.contains("settings kholo") ||
+        q.contains("सेटिंग खोलो")
+    ) {
+        return controller.openSettings()
+    }
+
+    // TIMER
+    val timerRegex = Regex(
+        """(?:timer|टाइमर)\s*(?:for\s*)?(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?|सेकंड|मिनट)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    val timerMatch = timerRegex.find(q)
+
+    if (timerMatch != null) {
+        val value = timerMatch.groupValues[1].toIntOrNull() ?: return null
+        val unit = timerMatch.groupValues[2].lowercase()
+
+        val seconds = when {
+            unit.startsWith("h") -> value * 3600
+            unit.startsWith("m") || unit.contains("मिनट") -> value * 60
+            else -> value
+        }
+
+        if (seconds > 0) {
+            return controller.setTimer(seconds, "JARVIS Timer")
+        }
+    }
+
+    // ALARM
+    val alarmRegex = Regex(
+        """(?:alarm|अलार्म)\s*(?:at|for)?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?""",
+        RegexOption.IGNORE_CASE
+    )
+
+    val alarmMatch = alarmRegex.find(q)
+
+    if (alarmMatch != null) {
+        var hour = alarmMatch.groupValues[1].toIntOrNull() ?: return null
+        val minute = alarmMatch.groupValues[2].toIntOrNull() ?: 0
+        val ampm = alarmMatch.groupValues[3].lowercase()
+
+        if (hour !in 0..23 || minute !in 0..59) {
+            return "Please provide a valid alarm time."
+        }
+
+        if (ampm == "pm" && hour in 1..11) hour += 12
+        if (ampm == "am" && hour == 12) hour = 0
+
+        return controller.setAlarm(hour, minute)
+    }
+
+    // OPEN APPS
+    val openWords = listOf(
+        "open ",
+        "launch ",
+        "start ",
+        "kholo ",
+        "kholo",
+        "chalao ",
+        "चलाओ",
+        "खोलो"
+    )
+
+    val isOpenCommand = openWords.any { q.contains(it) }
+
+    if (isOpenCommand) {
+        for ((appName, packageName) in appPackages) {
+            if (q.contains(appName)) {
+                return controller.openApp(packageName)
+            }
+        }
+    }
+
+    // DIRECT APP COMMAND
+    for ((appName, packageName) in appPackages) {
+        if (q == appName || q == "open $appName") {
+            return controller.openApp(packageName)
+        }
+    }
+
+    return null
+}
+
 @Composable
 fun JarvisApp() {
 
@@ -65,6 +200,10 @@ fun JarvisApp() {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
+    val phoneController = remember {
+        PhoneController(context)
+    }
+
     var input by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var listening by remember { mutableStateOf(false) }
@@ -72,6 +211,7 @@ fun JarvisApp() {
     var ttsReady by remember { mutableStateOf(false) }
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
 
+    // CHAT MEMORY
     val messages = remember {
         mutableStateListOf<ChatMessage>().apply {
             val saved = prefs.getString(CHAT_KEY, null)
@@ -79,7 +219,6 @@ fun JarvisApp() {
             if (saved != null) {
                 try {
                     val array = JSONArray(saved)
-
                     for (i in 0 until array.length()) {
                         val item = array.getJSONObject(i)
                         add(
@@ -112,7 +251,6 @@ fun JarvisApp() {
             if (saved != null) {
                 try {
                     val array = JSONArray(saved)
-
                     for (i in 0 until array.length()) {
                         add(array.getJSONObject(i))
                     }
@@ -123,10 +261,9 @@ fun JarvisApp() {
         }
     }
 
-    // SAVE CHAT AND MEMORY
+    // SAVE MEMORY
     fun saveMemory() {
         val chatArray = JSONArray()
-
         messages.forEach {
             chatArray.put(
                 JSONObject()
@@ -144,7 +281,7 @@ fun JarvisApp() {
             .apply()
     }
 
-    // TTS INITIALIZATION
+    // TEXT TO SPEECH
     DisposableEffect(context) {
         val engine = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -163,7 +300,6 @@ fun JarvisApp() {
         }
     }
 
-    // SPEAK AI REPLY
     fun speakText(text: String) {
         if (!voiceReplyEnabled || !ttsReady) return
 
@@ -180,17 +316,46 @@ fun JarvisApp() {
         if (question.isBlank() || loading) return
 
         messages.add(ChatMessage(question, true))
-
-        history.add(
-            JSONObject()
-                .put("role", "user")
-                .put("content", question)
-        )
-
         saveMemory()
         loading = true
 
         scope.launch {
+            // Phone control first
+            val phoneResult = executePhoneCommand(question, phoneController)
+
+            if (phoneResult != null) {
+                messages.add(ChatMessage(phoneResult, false))
+
+                history.add(
+                    JSONObject()
+                        .put("role", "user")
+                        .put("content", question)
+                )
+
+                history.add(
+                    JSONObject()
+                        .put("role", "assistant")
+                        .put("content", phoneResult)
+                )
+
+                saveMemory()
+                speakText(phoneResult)
+                loading = false
+
+                if (messages.isNotEmpty()) {
+                    listState.animateScrollToItem(messages.lastIndex)
+                }
+
+                return@launch
+            }
+
+            // AI CHAT
+            history.add(
+                JSONObject()
+                    .put("role", "user")
+                    .put("content", question)
+            )
+
             val result = askOpenRouter(history.toList())
 
             if (result.startsWith("ERROR:")) {
@@ -256,7 +421,7 @@ fun JarvisApp() {
         }
     }
 
-    // START MIC
+    // MICROPHONE
     fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             messages.add(
@@ -282,6 +447,7 @@ fun JarvisApp() {
         speechLauncher.launch(intent)
     }
 
+    // UI
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = bg
@@ -312,7 +478,7 @@ fun JarvisApp() {
                 Text(
                     text = when {
                         listening -> "● LISTENING..."
-                        loading -> "● THINKING..."
+                        loading -> "● EXECUTING..."
                         else -> "● ONLINE"
                     },
                     color = if (listening || loading) Color.Yellow
@@ -358,7 +524,7 @@ fun JarvisApp() {
                 }
             }
 
-            // VOICE CONTROLS
+            // VOICE CONTROL
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -452,7 +618,7 @@ fun JarvisApp() {
     }
 }
 
-// OPENROUTER
+// OPENROUTER AI
 suspend fun askOpenRouter(history: List<JSONObject>): String =
     withContext(Dispatchers.IO) {
         try {
@@ -473,7 +639,7 @@ suspend fun askOpenRouter(history: List<JSONObject>): String =
                         "Be friendly, smart, natural and helpful. " +
                         "Reply in Hindi, Hinglish or English according to the user. " +
                         "Keep answers clear and conversational. " +
-                        "Use the conversation history to understand context. " +
+                        "Use conversation history to understand context. " +
                         "Never pretend to perform actions you cannot perform."
                     )
             )
@@ -499,56 +665,4 @@ suspend fun askOpenRouter(history: List<JSONObject>): String =
                 .build()
 
             client.newCall(request).execute().use { response ->
-                val responseText = response.body?.string().orEmpty()
-
-                if (!response.isSuccessful) {
-                    return@withContext "ERROR: AI server error ${response.code}"
-                }
-
-                val result = JSONObject(responseText)
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content")
-
-                result.trim().ifEmpty {
-                    "I received an empty response."
-                }
-            }
-
-        } catch (e: Exception) {
-            "ERROR: Connection failed. Please check internet."
-        }
-    }
-
-// CHAT BUBBLE
-@Composable
-fun ChatBubble(message: ChatMessage) {
-
-    val bubbleColor = if (message.isUser) {
-        Color(0xFF123B58)
-    } else {
-        Color(0xFF142333)
-    }
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (message.isUser) Alignment.End
-        else Alignment.Start
-    ) {
-        Card(
-            modifier = Modifier.widthIn(max = 300.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = bubbleColor
-            )
-        ) {
-            Text(
-                text = message.text,
-                color = Color.White,
-                fontSize = 15.sp,
-                modifier = Modifier.padding(14.dp)
-            )
-        }
-    }
-}
+                val responseTex
