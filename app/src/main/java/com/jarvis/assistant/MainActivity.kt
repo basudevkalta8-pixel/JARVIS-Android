@@ -36,9 +36,7 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
 override fun onCreate(savedInstanceState: Bundle?) {
 super.onCreate(savedInstanceState)
-setContent {
-JarvisApp()
-}
+setContent { JarvisApp() }
 }
 }
 
@@ -55,15 +53,15 @@ private val bg = Color(0xFF07111F)
 fun JarvisApp() {
 
 val context = LocalContext.current
+val scope = rememberCoroutineScope()
+val listState = rememberLazyListState()
 
 var input by remember { mutableStateOf("") }
 var loading by remember { mutableStateOf(false) }
 var listening by remember { mutableStateOf(false) }
 var voiceReplyEnabled by remember { mutableStateOf(true) }
 var ttsReady by remember { mutableStateOf(false) }
-
-val scope = rememberCoroutineScope()
-val listState = rememberLazyListState()
+var tts by remember { mutableStateOf<TextToSpeech?>(null) }
 
 val messages = remember {
     mutableStateListOf(
@@ -73,18 +71,13 @@ val messages = remember {
 
 val history = remember { mutableStateListOf<JSONObject>() }
 
-var tts by remember { mutableStateOf<TextToSpeech?>(null) }
-
-// TEXT TO SPEECH INITIALIZATION
+// TTS INITIALIZATION
 DisposableEffect(context) {
-
     val engine = TextToSpeech(context) { status ->
         if (status == TextToSpeech.SUCCESS) {
-            tts?.let {
-                val result = it.setLanguage(Locale("hi", "IN"))
-                ttsReady = result != TextToSpeech.LANG_MISSING_DATA &&
-                        result != TextToSpeech.LANG_NOT_SUPPORTED
-            }
+            val languageResult = tts?.setLanguage(Locale("hi", "IN"))
+            ttsReady = languageResult != TextToSpeech.LANG_MISSING_DATA &&
+                    languageResult != TextToSpeech.LANG_NOT_SUPPORTED
         }
     }
 
@@ -96,26 +89,7 @@ DisposableEffect(context) {
     }
 }
 
-// SPEECH RECOGNITION
-val speechLauncher = rememberLauncherForActivityResult(
-    ActivityResultContracts.StartActivityForResult()
-) { result ->
-
-    listening = false
-
-    if (result.resultCode == android.app.Activity.RESULT_OK) {
-        val spokenText = result.data
-            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            ?.firstOrNull()
-
-        if (!spokenText.isNullOrBlank()) {
-            input = spokenText
-            sendSpokenMessage(spokenText)
-        }
-    }
-}
-
-// SPEAK AI RESPONSE
+// SPEAK AI REPLY
 fun speakText(text: String) {
     if (!voiceReplyEnabled || !ttsReady) return
 
@@ -127,12 +101,10 @@ fun speakText(text: String) {
     )
 }
 
-// SEND MESSAGE
+// SEND MESSAGE FUNCTION
 fun sendSpokenMessage(question: String) {
-
     if (question.isBlank() || loading) return
 
-    input = ""
     messages.add(ChatMessage(question, true))
 
     history.add(
@@ -144,19 +116,14 @@ fun sendSpokenMessage(question: String) {
     loading = true
 
     scope.launch {
-
         val result = askOpenRouter(history.toList())
 
         if (result.startsWith("ERROR:")) {
-
             messages.add(ChatMessage(result.removePrefix("ERROR:"), false))
-
             if (history.isNotEmpty()) {
                 history.removeAt(history.lastIndex)
             }
-
         } else {
-
             messages.add(ChatMessage(result, false))
 
             history.add(
@@ -176,16 +143,38 @@ fun sendSpokenMessage(question: String) {
     }
 }
 
-// MICROPHONE
-fun startListening() {
+// SPEECH RECOGNITION RESULT
+val speechLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.StartActivityForResult()
+) { result ->
+    listening = false
 
+    if (result.resultCode == android.app.Activity.RESULT_OK) {
+        val spokenText = result.data
+            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+
+        if (!spokenText.isNullOrBlank()) {
+            input = spokenText
+            sendSpokenMessage(spokenText)
+        }
+    }
+}
+
+// START MIC
+fun startListening() {
     if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-        messages.add(ChatMessage("Speech recognition is unavailable on this device.", false))
+        messages.add(
+            ChatMessage("Speech recognition is unavailable on this device.", false)
+        )
         return
     }
 
     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(
+            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+        )
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
         putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to JARVIS")
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
@@ -199,7 +188,6 @@ Surface(
     modifier = Modifier.fillMaxSize(),
     color = bg
 ) {
-
     Column(modifier = Modifier.fillMaxSize()) {
 
         // HEADER
@@ -207,7 +195,6 @@ Surface(
             modifier = Modifier.fillMaxWidth().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
             Text("J.A.R.V.I.S", fontSize = 30.sp, color = blue)
             Text("PERSONAL AI ASSISTANT", fontSize = 12.sp, color = Color.LightGray)
 
@@ -232,29 +219,37 @@ Surface(
             modifier = Modifier.weight(1f).fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-
             items(messages) { message ->
                 ChatBubble(message)
             }
 
             if (loading) {
                 item {
-                    Text("JARVIS is thinking...", color = blue, modifier = Modifier.padding(8.dp))
+                    Text(
+                        "JARVIS is thinking...",
+                        color = blue,
+                        modifier = Modifier.padding(8.dp)
+                    )
                 }
             }
         }
 
-        // VOICE SETTINGS
+        // VOICE CONTROLS
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-
-            Text("Voice Reply", color = Color.White, modifier = Modifier.weight(1f))
+            Text(
+                "Voice Reply",
+                color = Color.White,
+                modifier = Modifier.weight(1f)
+            )
 
             Button(
                 onClick = { tts?.stop() },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B2635))
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF8B2635)
+                )
             ) {
                 Text("Stop Voice")
             }
@@ -270,12 +265,11 @@ Surface(
             )
         }
 
-        // INPUT AREA
+        // INPUT
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
@@ -297,7 +291,9 @@ Surface(
             Button(
                 onClick = { startListening() },
                 enabled = !loading && !listening,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF163A54)),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF163A54)
+                ),
                 contentPadding = PaddingValues(horizontal = 12.dp)
             ) {
                 Text("🎤", fontSize = 20.sp)
@@ -309,6 +305,7 @@ Surface(
                 onClick = {
                     val question = input.trim()
                     if (question.isNotEmpty()) {
+                        input = ""
                         sendSpokenMessage(question)
                     }
                 },
@@ -324,85 +321,92 @@ Surface(
 
 }
 
-// OPENROUTER API
-suspend fun askOpenRouter(history: List<JSONObject>): String = withContext(Dispatchers.IO) {
+// OPENROUTER
+suspend fun askOpenRouter(history: List<JSONObject>): String =
+withContext(Dispatchers.IO) {
 
-try {
+    try {
+        val apiKey = BuildConfig.OPENROUTER_API_KEY
 
-    val apiKey = BuildConfig.OPENROUTER_API_KEY
-
-    if (apiKey.isBlank()) return@withContext "ERROR: OpenRouter API key missing."
-
-    val messagesArray = JSONArray()
-
-    messagesArray.put(
-        JSONObject()
-            .put("role", "system")
-            .put(
-                "content",
-                "You are JARVIS, an intelligent personal AI assistant. " +
-                        "Be friendly, smart, natural and helpful. " +
-                        "Reply in Hindi, Hinglish or English according to the user. " +
-                        "Keep answers clear and conversational. Never pretend to perform actions you cannot perform."
-            )
-    )
-
-    history.forEach { messagesArray.put(it) }
-
-    val json = JSONObject()
-        .put("model", "openrouter/free")
-        .put("messages", messagesArray)
-        .put("temperature", 0.7)
-
-    val body = json.toString().toRequestBody("application/json".toMediaType())
-
-    val request = Request.Builder()
-        .url("https://openrouter.ai/api/v1/chat/completions")
-        .addHeader("Authorization", "Bearer $apiKey")
-        .addHeader("Content-Type", "application/json")
-        .post(body)
-        .build()
-
-    client.newCall(request).execute().use { response ->
-
-        val responseText = response.body?.string().orEmpty()
-
-        if (!response.isSuccessful) {
-            return@withContext "ERROR: AI server error ${response.code}"
+        if (apiKey.isBlank()) {
+            return@withContext "ERROR: OpenRouter API key missing."
         }
 
-        val result = JSONObject(responseText)
-            .getJSONArray("choices")
-            .getJSONObject(0)
-            .getJSONObject("message")
-            .getString("content")
+        val messagesArray = JSONArray()
 
-        result.trim().ifEmpty { "I received an empty response." }
+        messagesArray.put(
+            JSONObject()
+                .put("role", "system")
+                .put(
+                    "content",
+                    "You are JARVIS, an intelligent personal AI assistant. " +
+                            "Be friendly, smart, natural and helpful. " +
+                            "Reply in Hindi, Hinglish or English according to the user. " +
+                            "Keep answers clear and conversational. " +
+                            "Never pretend to perform actions you cannot perform."
+                )
+        )
+
+        history.forEach { messagesArray.put(it) }
+
+        val json = JSONObject()
+            .put("model", "openrouter/free")
+            .put("messages", messagesArray)
+            .put("temperature", 0.7)
+
+        val body = json.toString().toRequestBody(
+            "application/json".toMediaType()
+        )
+
+        val request = Request.Builder()
+            .url("https://openrouter.ai/api/v1/chat/completions")
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .post(body)
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val responseText = response.body?.string().orEmpty()
+
+            if (!response.isSuccessful) {
+                return@withContext "ERROR: AI server error ${response.code}"
+            }
+
+            val result = JSONObject(responseText)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content")
+
+            result.trim().ifEmpty {
+                "I received an empty response."
+            }
+        }
+
+    } catch (e: Exception) {
+        "ERROR: Connection failed. Please check internet."
     }
-
-} catch (e: Exception) {
-    "ERROR: Connection failed. Please check internet."
-}
-
 }
 
 // CHAT BUBBLE
 @Composable
 fun ChatBubble(message: ChatMessage) {
 
-val bubbleColor = if (message.isUser) Color(0xFF123B58) else Color(0xFF142333)
+val bubbleColor = if (message.isUser) {
+    Color(0xFF123B58)
+} else {
+    Color(0xFF142333)
+}
 
 Column(
     modifier = Modifier.fillMaxWidth(),
     horizontalAlignment = if (message.isUser) Alignment.End else Alignment.Start
 ) {
-
     Card(
         modifier = Modifier.widthIn(max = 300.dp),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = bubbleColor)
     ) {
-
         Text(
             text = message.text,
             color = Color.White,
