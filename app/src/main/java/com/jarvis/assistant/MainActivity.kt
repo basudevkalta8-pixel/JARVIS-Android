@@ -1,8 +1,8 @@
 package com.jarvis.assistant
 
-import android.os.Bundle
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
@@ -33,28 +33,52 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import java.util.concurrent.TimeUnit
+
+// ======================================================
+// MAIN ACTIVITY
+// ======================================================
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContent {
             JarvisApp()
         }
     }
 }
 
+// ======================================================
+// CHAT MODEL
+// ======================================================
+
 data class ChatMessage(
     val text: String,
     val isUser: Boolean
 )
 
-private val client = OkHttpClient()
+// ======================================================
+// GLOBAL SETTINGS
+// ======================================================
+
+private val client = OkHttpClient.Builder()
+    .connectTimeout(30, TimeUnit.SECONDS)
+    .readTimeout(60, TimeUnit.SECONDS)
+    .writeTimeout(30, TimeUnit.SECONDS)
+    .build()
+
 private val blue = Color(0xFF00C8FF)
 private val bg = Color(0xFF07111F)
 
 private const val PREFS_NAME = "jarvis_memory"
 private const val CHAT_KEY = "saved_chat"
 private const val HISTORY_KEY = "saved_history"
+
+// ======================================================
+// APP PACKAGE LIST
+// ======================================================
 
 private val appPackages = mapOf(
     "youtube" to "com.google.android.youtube",
@@ -69,7 +93,124 @@ private val appPackages = mapOf(
     "free fire" to "com.dts.freefireth"
 )
 
+// ======================================================
+// OPENROUTER AI
+// ======================================================
+
+private suspend fun askOpenRouter(
+    history: List<JSONObject>
+): String = withContext(Dispatchers.IO) {
+
+    try {
+
+        val apiKey = BuildConfig.OPENROUTER_API_KEY
+
+        if (apiKey.isBlank()) {
+            return@withContext "ERROR: OpenRouter API key is missing. Please configure your API key."
+        }
+
+        val messagesArray = JSONArray()
+
+        // System instruction
+        messagesArray.put(
+            JSONObject()
+                .put("role", "system")
+                .put(
+                    "content",
+                    """
+                    You are JARVIS, a smart personal AI assistant.
+                    
+                    Personality:
+                    - Friendly, helpful and intelligent.
+                    - Talk naturally like a close friend.
+                    - Call the user bhai when appropriate.
+                    - Keep answers clear and easy to understand.
+                    
+                    Language:
+                    - Reply in Hindi, Hinglish or English.
+                    - Follow the language used by the user.
+                    - If the user speaks Hindi in Roman letters, reply in natural Hinglish.
+                    - Do not use overly formal Hindi.
+                    
+                    Behavior:
+                    - Answer questions accurately.
+                    - Help with Android, technology, studies, daily life and coding.
+                    - Keep simple questions short.
+                    - Give detailed explanations when asked.
+                    - Never pretend to perform phone actions you cannot perform.
+                    - You are JARVIS, not a generic chatbot.
+                    """.trimIndent()
+                )
+        )
+
+        // Conversation history
+        history.forEach { item ->
+            messagesArray.put(item)
+        }
+
+        val requestJson = JSONObject()
+            .put("model", "openrouter/free")
+            .put("messages", messagesArray)
+            .put("temperature", 0.7)
+            .put("max_tokens", 1500)
+
+        val body = requestJson.toString()
+            .toRequestBody("application/json".toMediaType())
+
+        val request = Request.Builder()
+            .url("https://openrouter.ai/api/v1/chat/completions")
+            .addHeader("Authorization", "Bearer $apiKey")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("HTTP-Referer", "https://github.com/")
+            .addHeader("X-Title", "JARVIS Android Assistant")
+            .post(body)
+            .build()
+
+        client.newCall(request).execute().use { response ->
+
+            val responseText = response.body?.string().orEmpty()
+
+            if (!response.isSuccessful) {
+
+                val errorMessage = try {
+                    JSONObject(responseText)
+                        .optJSONObject("error")
+                        ?.optString("message")
+                        ?: "HTTP ${response.code}"
+                } catch (_: Exception) {
+                    "HTTP ${response.code}"
+                }
+
+                return@withContext "ERROR: AI connection failed: $errorMessage"
+            }
+
+            val json = JSONObject(responseText)
+
+            val answer = json
+                .optJSONArray("choices")
+                ?.optJSONObject(0)
+                ?.optJSONObject("message")
+                ?.optString("content")
+                .orEmpty()
+
+            if (answer.isBlank()) {
+                "ERROR: AI returned an empty response."
+            } else {
+                answer.trim()
+            }
+        }
+
+    } catch (e: Exception) {
+
+        "ERROR: ${e.localizedMessage ?: "Unable to connect to AI"}"
+    }
+}
+
+// ======================================================
 // PHONE COMMANDS
+// PhoneController is in your separate PhoneController.kt
+// ======================================================
+
 fun executePhoneCommand(
     question: String,
     controller: PhoneController
@@ -77,7 +218,7 @@ fun executePhoneCommand(
 
     val q = question.lowercase(Locale.ROOT).trim()
 
-    // FLASHLIGHT ON
+    // TORCH ON
     if (
         q.contains("torch on") ||
         q.contains("flashlight on") ||
@@ -89,7 +230,7 @@ fun executePhoneCommand(
         return controller.torchOn()
     }
 
-    // FLASHLIGHT OFF
+    // TORCH OFF
     if (
         q.contains("torch off") ||
         q.contains("flashlight off") ||
@@ -121,7 +262,10 @@ fun executePhoneCommand(
     val timerMatch = timerRegex.find(q)
 
     if (timerMatch != null) {
-        val value = timerMatch.groupValues[1].toIntOrNull() ?: return null
+
+        val value = timerMatch.groupValues[1].toIntOrNull()
+            ?: return "Invalid timer duration."
+
         val unit = timerMatch.groupValues[2].lowercase()
 
         val seconds = when {
@@ -144,16 +288,32 @@ fun executePhoneCommand(
     val alarmMatch = alarmRegex.find(q)
 
     if (alarmMatch != null) {
-        var hour = alarmMatch.groupValues[1].toIntOrNull() ?: return null
+
+        var hour = alarmMatch.groupValues[1].toIntOrNull()
+            ?: return "Invalid alarm time."
+
         val minute = alarmMatch.groupValues[2].toIntOrNull() ?: 0
         val ampm = alarmMatch.groupValues[3].lowercase()
 
-        if (hour !in 0..23 || minute !in 0..59) {
+        if (minute !in 0..59) {
             return "Please provide a valid alarm time."
         }
 
-        if (ampm == "pm" && hour in 1..11) hour += 12
-        if (ampm == "am" && hour == 12) hour = 0
+        if (ampm.isNotEmpty() && hour !in 1..12) {
+            return "Please provide a valid alarm time."
+        }
+
+        if (ampm == "pm" && hour in 1..11) {
+            hour += 12
+        }
+
+        if (ampm == "am" && hour == 12) {
+            hour = 0
+        }
+
+        if (hour !in 0..23) {
+            return "Please provide a valid alarm time."
+        }
 
         return controller.setAlarm(hour, minute)
     }
@@ -166,13 +326,16 @@ fun executePhoneCommand(
         "kholo ",
         "chalao ",
         "चलाओ",
-        "खोलो"
+        "खोलो",
+        " kholo"
     )
 
     val isOpenCommand = openWords.any { q.contains(it) }
 
     if (isOpenCommand) {
+
         for ((appName, packageName) in appPackages) {
+
             if (q.contains(appName)) {
                 return controller.openApp(packageName)
             }
@@ -181,6 +344,7 @@ fun executePhoneCommand(
 
     // DIRECT APP COMMAND
     for ((appName, packageName) in appPackages) {
+
         if (q == appName || q == "open $appName") {
             return controller.openApp(packageName)
         }
@@ -189,7 +353,10 @@ fun executePhoneCommand(
     return null
 }
 
-// MAIN APP
+// ======================================================
+// MAIN JARVIS APP
+// ======================================================
+
 @Composable
 fun JarvisApp() {
 
@@ -198,7 +365,10 @@ fun JarvisApp() {
     val listState = rememberLazyListState()
 
     val prefs = remember {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        context.getSharedPreferences(
+            PREFS_NAME,
+            Context.MODE_PRIVATE
+        )
     }
 
     val phoneController = remember {
@@ -208,38 +378,54 @@ fun JarvisApp() {
     var input by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var listening by remember { mutableStateOf(false) }
-    var voiceReplyEnabled by remember { mutableStateOf(true) }
+
+    var voiceReplyEnabled by remember {
+        mutableStateOf(
+            prefs.getBoolean("voice_enabled", true)
+        )
+    }
+
     var ttsReady by remember { mutableStateOf(false) }
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
 
+    // ==================================================
     // CHAT MEMORY
+    // ==================================================
+
     val messages = remember {
+
         mutableStateListOf<ChatMessage>().apply {
+
             val saved = prefs.getString(CHAT_KEY, null)
 
             if (saved != null) {
+
                 try {
+
                     val array = JSONArray(saved)
 
                     for (i in 0 until array.length()) {
+
                         val item = array.getJSONObject(i)
 
                         add(
                             ChatMessage(
-                                item.getString("text"),
-                                item.getBoolean("isUser")
+                                text = item.getString("text"),
+                                isUser = item.getBoolean("isUser")
                             )
                         )
                     }
+
                 } catch (_: Exception) {
                     clear()
                 }
             }
 
             if (isEmpty()) {
+
                 add(
                     ChatMessage(
-                        "Hello! I am JARVIS. How can I assist you today?",
+                        "Hello! I am JARVIS. How can I assist you today, bhai?",
                         false
                     )
                 )
@@ -247,18 +433,26 @@ fun JarvisApp() {
         }
     }
 
+    // ==================================================
     // AI HISTORY
+    // ==================================================
+
     val history = remember {
+
         mutableStateListOf<JSONObject>().apply {
+
             val saved = prefs.getString(HISTORY_KEY, null)
 
             if (saved != null) {
+
                 try {
+
                     val array = JSONArray(saved)
 
                     for (i in 0 until array.length()) {
                         add(array.getJSONObject(i))
                     }
+
                 } catch (_: Exception) {
                     clear()
                 }
@@ -266,21 +460,27 @@ fun JarvisApp() {
         }
     }
 
-    // SAVE MEMORY
+    // ==================================================
+    // SAVE CHAT AND MEMORY
+    // ==================================================
+
     fun saveMemory() {
+
         val chatArray = JSONArray()
 
-        messages.forEach {
+        messages.forEach { message ->
+
             chatArray.put(
                 JSONObject()
-                    .put("text", it.text)
-                    .put("isUser", it.isUser)
+                    .put("text", message.text)
+                    .put("isUser", message.isUser)
             )
         }
 
         val historyArray = JSONArray()
-        history.forEach {
-            historyArray.put(it)
+
+        history.forEach { item ->
+            historyArray.put(item)
         }
 
         prefs.edit()
@@ -289,12 +489,19 @@ fun JarvisApp() {
             .apply()
     }
 
+    // ==================================================
     // TEXT TO SPEECH
+    // ==================================================
+
     DisposableEffect(context) {
 
         val engine = TextToSpeech(context) { status ->
+
             if (status == TextToSpeech.SUCCESS) {
-                val result = tts?.setLanguage(Locale("hi", "IN"))
+
+                val result = tts?.setLanguage(
+                    Locale("hi", "IN")
+                )
 
                 ttsReady =
                     result != TextToSpeech.LANG_MISSING_DATA &&
@@ -305,13 +512,21 @@ fun JarvisApp() {
         tts = engine
 
         onDispose {
+
             engine.stop()
             engine.shutdown()
+
+            tts = null
+            ttsReady = false
         }
     }
 
+    // ==================================================
     // SPEAK
+    // ==================================================
+
     fun speakText(text: String) {
+
         if (!voiceReplyEnabled || !ttsReady) return
 
         tts?.speak(
@@ -322,19 +537,27 @@ fun JarvisApp() {
         )
     }
 
+    // ==================================================
     // SEND MESSAGE
+    // ==================================================
+
     fun sendSpokenMessage(question: String) {
 
         if (question.isBlank() || loading) return
 
-        messages.add(ChatMessage(question, true))
+        messages.add(
+            ChatMessage(question, true)
+        )
+
         saveMemory()
         loading = true
 
         scope.launch {
+
             try {
 
                 // PHONE COMMANDS FIRST
+
                 val phoneResult = executePhoneCommand(
                     question,
                     phoneController
@@ -342,7 +565,9 @@ fun JarvisApp() {
 
                 if (phoneResult != null) {
 
-                    messages.add(ChatMessage(phoneResult, false))
+                    messages.add(
+                        ChatMessage(phoneResult, false)
+                    )
 
                     history.add(
                         JSONObject()
@@ -362,13 +587,16 @@ fun JarvisApp() {
                 } else {
 
                     // NORMAL AI CHAT
+
                     history.add(
                         JSONObject()
                             .put("role", "user")
                             .put("content", question)
                     )
 
-                    val result = askOpenRouter(history.toList())
+                    val result = askOpenRouter(
+                        history.toList()
+                    )
 
                     if (result.startsWith("ERROR:")) {
 
@@ -379,13 +607,16 @@ fun JarvisApp() {
                             )
                         )
 
+                        // Remove failed user message from AI history
                         if (history.isNotEmpty()) {
                             history.removeAt(history.lastIndex)
                         }
 
                     } else {
 
-                        messages.add(ChatMessage(result, false))
+                        messages.add(
+                            ChatMessage(result, false)
+                        )
 
                         history.add(
                             JSONObject()
@@ -403,7 +634,9 @@ fun JarvisApp() {
 
                 messages.add(
                     ChatMessage(
-                        "Something went wrong: ${e.localizedMessage ?: "Unknown error"}",
+                        "Something went wrong: ${
+                            e.localizedMessage ?: "Unknown error"
+                        }",
                         false
                     )
                 )
@@ -413,15 +646,23 @@ fun JarvisApp() {
                 loading = false
 
                 if (messages.isNotEmpty()) {
-                    listState.animateScrollToItem(messages.lastIndex)
+
+                    listState.animateScrollToItem(
+                        messages.lastIndex
+                    )
                 }
             }
         }
     }
 
+    // ==================================================
     // CLEAR CHAT
+    // ==================================================
+
     fun clearChat() {
+
         tts?.stop()
+
         messages.clear()
         history.clear()
 
@@ -435,27 +676,40 @@ fun JarvisApp() {
         saveMemory()
     }
 
+    // ==================================================
     // SPEECH RECOGNITION
-    val speechLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+    // ==================================================
 
-        listening = false
+    val speechLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
 
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            listening = false
 
-            val spokenText = result.data
-                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                ?.firstOrNull()
+            if (
+                result.resultCode ==
+                android.app.Activity.RESULT_OK
+            ) {
 
-            if (!spokenText.isNullOrBlank()) {
-                input = spokenText
-                sendSpokenMessage(spokenText)
+                val spokenText = result.data
+                    ?.getStringArrayListExtra(
+                        RecognizerIntent.EXTRA_RESULTS
+                    )
+                    ?.firstOrNull()
+
+                if (!spokenText.isNullOrBlank()) {
+
+                    input = spokenText
+                    sendSpokenMessage(spokenText)
+                }
             }
         }
-    }
 
+    // ==================================================
     // START LISTENING
+    // ==================================================
+
     fun startListening() {
 
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
@@ -471,7 +725,7 @@ fun JarvisApp() {
         }
 
         val intent = Intent(
-            RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+        RecognizerIntent.ACTION_RECOGNIZE_SPEECH
         ).apply {
 
             putExtra(
@@ -499,7 +753,10 @@ fun JarvisApp() {
         speechLauncher.launch(intent)
     }
 
-    // UI
+    // ==================================================
+    // USER INTERFACE
+    // ==================================================
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = bg
@@ -510,6 +767,7 @@ fun JarvisApp() {
         ) {
 
             // HEADER
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -518,13 +776,13 @@ fun JarvisApp() {
             ) {
 
                 Text(
-                    "J.A.R.V.I.S",
+                    text = "J.A.R.V.I.S",
                     fontSize = 30.sp,
                     color = blue
                 )
 
                 Text(
-                    "PERSONAL AI ASSISTANT",
+                    text = "PERSONAL AI ASSISTANT",
                     fontSize = 12.sp,
                     color = Color.LightGray
                 )
@@ -537,8 +795,10 @@ fun JarvisApp() {
                         loading -> "● EXECUTING..."
                         else -> "● ONLINE"
                     },
-                    color = if (listening || loading) Color.Yellow
-                    else Color.Green,
+                    color = when {
+                        listening || loading -> Color.Yellow
+                        else -> Color.Green
+                    },
                     fontSize = 13.sp
                 )
 
@@ -558,7 +818,8 @@ fun JarvisApp() {
                 color = blue.copy(alpha = 0.3f)
             )
 
-            // CHAT MESSAGES
+            // CHAT AREA
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -569,13 +830,16 @@ fun JarvisApp() {
             ) {
 
                 items(messages) { message ->
+
                     ChatBubble(message)
                 }
 
                 if (loading) {
+
                     item {
+
                         Text(
-                            "JARVIS is thinking...",
+                            text = "JARVIS is thinking...",
                             color = blue,
                             modifier = Modifier.padding(8.dp)
                         )
@@ -584,21 +848,27 @@ fun JarvisApp() {
             }
 
             // VOICE CONTROL
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(
+                        horizontal = 16.dp,
+                        vertical = 4.dp
+                    ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
 
                 Text(
-                    "Voice Reply",
+                    text = "Voice Reply",
                     color = Color.White,
                     modifier = Modifier.weight(1f)
                 )
 
                 Button(
-                    onClick = { tts?.stop() },
+                    onClick = {
+                        tts?.stop()
+                    },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF8B2635)
                     )
@@ -610,14 +880,23 @@ fun JarvisApp() {
 
                 Switch(
                     checked = voiceReplyEnabled,
-                    onCheckedChange = {
-                        voiceReplyEnabled = it
-                        if (!it) tts?.stop()
+                    onCheckedChange = { enabled ->
+
+                        voiceReplyEnabled = enabled
+
+                        prefs.edit()
+                            .putBoolean("voice_enabled", enabled)
+                            .apply()
+
+                        if (!enabled) {
+                            tts?.stop()
+                        }
                     }
                 )
             }
 
-            // INPUT
+            // MESSAGE INPUT
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -627,11 +906,13 @@ fun JarvisApp() {
 
                 OutlinedTextField(
                     value = input,
-                    onValueChange = { input = it },
+                    onValueChange = {
+                        input = it
+                    },
                     modifier = Modifier.weight(1f),
                     placeholder = {
                         Text(
-                            "Ask JARVIS...",
+                            text = "Ask JARVIS...",
                             color = Color.Gray
                         )
                     },
@@ -648,24 +929,38 @@ fun JarvisApp() {
 
                 Spacer(modifier = Modifier.width(6.dp))
 
+                // MIC BUTTON
+
                 Button(
-                    onClick = { startListening() },
+                    onClick = {
+                        startListening()
+                    },
                     enabled = !loading && !listening,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF163A54)
                     ),
-                    contentPadding = PaddingValues(horizontal = 12.dp)
+                    contentPadding = PaddingValues(
+                        horizontal = 12.dp
+                    )
                 ) {
-                    Text("🎤", fontSize = 20.sp)
+
+                    Text(
+                        text = "🎤",
+                        fontSize = 20.sp
+                    )
                 }
 
                 Spacer(modifier = Modifier.width(6.dp))
 
+                // SEND BUTTON
+
                 Button(
                     onClick = {
+
                         val question = input.trim()
 
                         if (question.isNotEmpty()) {
+
                             input = ""
                             sendSpokenMessage(question)
                         }
@@ -674,10 +969,13 @@ fun JarvisApp() {
                     colors = ButtonDefaults.buttonColors(
                         containerColor = blue
                     ),
-                    contentPadding = PaddingValues(horizontal = 12.dp)
+                    contentPadding = PaddingValues(
+                        horizontal = 12.dp
+                    )
                 ) {
+
                     Text(
-                        "Send",
+                        text = "Send",
                         color = Color.Black
                     )
                 }
@@ -686,7 +984,10 @@ fun JarvisApp() {
     }
 }
 
+// ======================================================
 // CHAT BUBBLE
+// ======================================================
+
 @Composable
 fun ChatBubble(message: ChatMessage) {
 
@@ -694,13 +995,19 @@ fun ChatBubble(message: ChatMessage) {
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (user) Arrangement.End
-        else Arrangement.Start
+        horizontalArrangement = if (user) {
+            Arrangement.End
+        } else {
+            Arrangement.Start
+        }
     ) {
 
         Surface(
-            color = if (user) Color(0xFF123C59)
-            else Color(0xFF142332),
+            color = if (user) {
+                Color(0xFF123C59)
+            } else {
+                Color(0xFF142332)
+            },
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.widthIn(max = 320.dp)
         ) {
@@ -711,5 +1018,24 @@ fun ChatBubble(message: ChatMessage) {
 
                 Text(
                     text = if (user) "YOU" else "JARVIS",
-                    color = if (user) blue else Color(0xFF62E6A5),
+                    color = if (user) {
+                        blue
+                    } else {
+                        Color(0xFF62E6A5)
+                    },
                     fontSize = 11.sp
+                )
+
+                Spacer(
+                    modifier = Modifier.height(5.dp)
+                )
+
+                Text(
+                    text = message.text,
+                    color = Color.White,
+                    fontSize = 15.sp
+                )
+            }
+        }
+    }
+}
