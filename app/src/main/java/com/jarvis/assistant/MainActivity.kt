@@ -80,17 +80,47 @@ private const val HISTORY_KEY = "saved_history"
 // APP PACKAGE LIST
 // ======================================================
 
-private val appPackages = mapOf(
+private val appPackages = linkedMapOf(
+    // Common apps (command aliases mapped to launch packages)
     "youtube" to "com.google.android.youtube",
+    "you tube" to "com.google.android.youtube",
     "whatsapp" to "com.whatsapp",
+    "whats app" to "com.whatsapp",
     "chrome" to "com.android.chrome",
+    "google chrome" to "com.android.chrome",
     "instagram" to "com.instagram.android",
+    "insta" to "com.instagram.android",
     "facebook" to "com.facebook.katana",
+    "fb" to "com.facebook.katana",
     "maps" to "com.google.android.apps.maps",
+    "google maps" to "com.google.android.apps.maps",
     "camera" to "com.android.camera",
     "gmail" to "com.google.android.gm",
+    "mail" to "com.google.android.gm",
     "telegram" to "org.telegram.messenger",
-    "free fire" to "com.dts.freefireth"
+    "free fire" to "com.dts.freefireth",
+    "freefire" to "com.dts.freefireth",
+    "spotify" to "com.spotify.music",
+    "youtube music" to "com.google.android.apps.youtube.music",
+    "calculator" to "com.google.android.calculator",
+    "clock" to "com.google.android.deskclock",
+    "phone" to "com.google.android.dialer",
+    "dialer" to "com.google.android.dialer",
+    "contacts" to "com.google.android.contacts",
+    "contact" to "com.google.android.contacts",
+    "messages" to "com.google.android.apps.messaging",
+    "sms" to "com.google.android.apps.messaging",
+    "files" to "com.google.android.documentsui",
+    "file manager" to "com.google.android.documentsui",
+    "gallery" to "com.google.android.apps.photos",
+    "photos" to "com.google.android.apps.photos",
+    "google photos" to "com.google.android.apps.photos",
+    "play store" to "com.android.vending",
+    "store" to "com.android.vending",
+    "drive" to "com.google.android.apps.docs",
+    "google drive" to "com.google.android.apps.docs",
+    "calendar" to "com.google.android.calendar",
+    "meet" to "com.google.android.apps.meetings"
 )
 
 // ======================================================
@@ -320,32 +350,25 @@ fun executePhoneCommand(
 
     // OPEN APPS
     val openWords = listOf(
-        "open ",
-        "launch ",
-        "start ",
-        "kholo ",
-        "chalao ",
-        "चलाओ",
-        "खोलो",
-        " kholo"
+        "open ", "launch ", "start ", "show ", " kholo", " khol", " kholna",
+        "kholo ", "khol do", "chalao ", "चलाओ", "खोलो", "खोलना", "खोल दो",
+        "ओपन ", "शुरू करो"
     )
 
     val isOpenCommand = openWords.any { q.contains(it) }
 
+    // Match longer app aliases first (e.g. "youtube music" before "youtube").
     if (isOpenCommand) {
-
-        for ((appName, packageName) in appPackages) {
-
+        for ((appName, packageName) in appPackages.entries.sortedByDescending { it.key.length }) {
             if (q.contains(appName)) {
                 return controller.openApp(packageName)
             }
         }
     }
 
-    // DIRECT APP COMMAND
-    for ((appName, packageName) in appPackages) {
-
-        if (q == appName || q == "open $appName") {
+    // Direct app-name commands, such as simply saying "WhatsApp".
+    for ((appName, packageName) in appPackages.entries.sortedByDescending { it.key.length }) {
+        if (q == appName || q == "open $appName" || q == "$appName kholo" || q == "$appName खोलो") {
             return controller.openApp(packageName)
         }
     }
