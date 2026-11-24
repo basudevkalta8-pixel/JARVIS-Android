@@ -248,7 +248,79 @@ fun executePhoneCommand(
 
     val q = question.lowercase(Locale.ROOT).trim()
 
-    // TORCH ON
+    // BATTERY
+    if (
+        q.contains("battery") ||
+        q.contains("बैटरी")
+    ) {
+        return controller.getBattery()
+    }
+
+    // VOLUME UP
+    if (
+        q.contains("volume up") ||
+        q.contains("volume badhao") ||
+        q.contains("awaz badhao") ||
+        q.contains("आवाज बढ़ाओ")
+    ) {
+        return controller.volumeUp()
+    }
+
+    // VOLUME DOWN
+    if (
+        q.contains("volume down") ||
+        q.contains("volume kam") ||
+        q.contains("awaz kam") ||
+        q.contains("आवाज कम")
+    ) {
+        return controller.volumeDown()
+    }
+
+    // MUTE
+    if (
+        q.contains("mute") ||
+        q.contains("sound band") ||
+        q.contains("आवाज बंद")
+    ) {
+        return controller.muteVolume()
+    }
+
+    // GOOGLE SEARCH
+    if (
+        q.contains("google") ||
+        q.startsWith("search ")
+    ) {
+        val searchQuery = q
+            .replace("google par", "")
+            .replace("google pe", "")
+            .replace("google me", "")
+            .replace("search google for", "")
+            .replace("search for", "")
+            .replace("search", "")
+            .replace("karo", "")
+            .replace("kar do", "")
+            .replace("search karo", "")
+            .trim()
+
+        if (searchQuery.isNotBlank()) {
+            return controller.googleSearch(searchQuery)
+        }
+    }
+
+    // WIFI SETTINGS
+    if (
+        q.contains("wifi") ||
+        q.contains("wi-fi")
+    ) {
+        return controller.openWifiSettings()
+    }
+
+    // BLUETOOTH SETTINGS
+    if (q.contains("bluetooth")) {
+        return controller.openBluetoothSettings()
+    }
+
+    // FLASHLIGHT ON
     if (
         q.contains("torch on") ||
         q.contains("flashlight on") ||
@@ -260,7 +332,7 @@ fun executePhoneCommand(
         return controller.torchOn()
     }
 
-    // TORCH OFF
+    // FLASHLIGHT OFF
     if (
         q.contains("torch off") ||
         q.contains("flashlight off") ||
@@ -277,8 +349,7 @@ fun executePhoneCommand(
         q == "settings" ||
         q.contains("open settings") ||
         q.contains("phone settings") ||
-        q.contains("settings kholo") ||
-        q.contains("सेटिंग खोलो")
+        q.contains("settings kholo")
     ) {
         return controller.openSettings()
     }
@@ -292,7 +363,6 @@ fun executePhoneCommand(
     val timerMatch = timerRegex.find(q)
 
     if (timerMatch != null) {
-
         val value = timerMatch.groupValues[1].toIntOrNull()
             ?: return "Invalid timer duration."
 
@@ -318,46 +388,32 @@ fun executePhoneCommand(
     val alarmMatch = alarmRegex.find(q)
 
     if (alarmMatch != null) {
-
         var hour = alarmMatch.groupValues[1].toIntOrNull()
             ?: return "Invalid alarm time."
 
         val minute = alarmMatch.groupValues[2].toIntOrNull() ?: 0
         val ampm = alarmMatch.groupValues[3].lowercase()
 
-        if (minute !in 0..59) {
-            return "Please provide a valid alarm time."
-        }
+        if (minute !in 0..59) return "Invalid alarm time."
 
-        if (ampm.isNotEmpty() && hour !in 1..12) {
-            return "Please provide a valid alarm time."
-        }
+        if (ampm == "pm" && hour in 1..11) hour += 12
+        if (ampm == "am" && hour == 12) hour = 0
 
-        if (ampm == "pm" && hour in 1..11) {
-            hour += 12
-        }
-
-        if (ampm == "am" && hour == 12) {
-            hour = 0
-        }
-
-        if (hour !in 0..23) {
-            return "Please provide a valid alarm time."
-        }
+        if (hour !in 0..23) return "Invalid alarm time."
 
         return controller.setAlarm(hour, minute)
     }
 
     // OPEN APPS
     val openWords = listOf(
-        "open ", "launch ", "start ", "show ", " kholo", " khol", " kholna",
-        "kholo ", "khol do", "chalao ", "चलाओ", "खोलो", "खोलना", "खोल दो",
-        "ओपन ", "शुरू करो"
+        "open ", "launch ", "start ", "show ",
+        " kholo", " khol", " kholna",
+        "kholo ", "khol do", "chalao ",
+        "चलाओ", "खोलो", "खोलना", "खोल दो"
     )
 
     val isOpenCommand = openWords.any { q.contains(it) }
 
-    // Match longer app aliases first (e.g. "youtube music" before "youtube").
     if (isOpenCommand) {
         for ((appName, packageName) in appPackages.entries.sortedByDescending { it.key.length }) {
             if (q.contains(appName)) {
@@ -366,9 +422,12 @@ fun executePhoneCommand(
         }
     }
 
-    // Direct app-name commands, such as simply saying "WhatsApp".
     for ((appName, packageName) in appPackages.entries.sortedByDescending { it.key.length }) {
-        if (q == appName || q == "open $appName" || q == "$appName kholo" || q == "$appName खोलो") {
+        if (
+            q == appName ||
+            q == "open $appName" ||
+            q == "$appName kholo"
+        ) {
             return controller.openApp(packageName)
         }
     }
